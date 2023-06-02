@@ -5,14 +5,17 @@ import os
 from torch.utils.data import DataLoader
 from dataset import WordVocab
 from model.bert import BERT
-from dataset import BERTDataset,collate_mlm
-from driver import BERTTrainer
+from dataset import BERTDataset, collate_mlm
+from driver import BERTTrainer, BERTTrainerTTS
+from transformer import Encoder
 from module import Paths
 import torch
 import numpy as np
 import configs.hparams as hp
 import random
+import yaml
 import pdb
+from dataset_multi import Dataset
 
 def train():
     os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
@@ -45,27 +48,36 @@ def train():
     train_dataset = BERTDataset(args.train_dataset, vocab,  corpus_lines=args.corpus_lines, on_memory=args.on_memory)
 
     print("Loading Valid Dataset", args.valid_dataset)
-    valid_dataset = BERTDataset(args.valid_dataset, vocab, on_memory=args.on_memory) \
-        if args.valid_dataset is not None else None
 
+    path = "LibriTTS_StyleSpeech_multilingual_diffusion_style_3layer"
+    # path = "VNTTS"
+    # path = "LibriTTS_StyleSpeech_multilingual_diffusion_style_EN"
+    preprocess_config = yaml.load(
+        open("./config/config_kaga/{0}/preprocess.yaml".format(path), "r"), Loader=yaml.FullLoader
+    )
+    train_config = yaml.load(
+        open("./config/config_kaga/{0}/train.yaml".format(path), "r"), Loader=yaml.FullLoader
+    )
+    model_config = yaml.load(
+        open("./config/config_kaga/{0}/model.yaml".format(path), "r"), Loader=yaml.FullLoader
+    )
+    train_dataset = Dataset("train.txt", preprocess_config, train_config, sort=True, drop_last=True)
+    val_dataset = Dataset("val.txt", preprocess_config, train_config, sort=False, drop_last=False)
     print("Creating Dataloader")
-    train_data_loader = DataLoader(train_dataset, batch_size=2, collate_fn=lambda batch: collate_mlm(batch),num_workers=args.num_workers, shuffle=False) # 训练语料按长度排好序的
-    valid_data_loader = DataLoader(valid_dataset, batch_size=hp.batch_size, collate_fn=lambda batch: collate_mlm(batch), num_workers=args.num_workers, shuffle=False) \
-        if valid_dataset is not None else None
-    for batch in train_data_loader:
-        pdb.set_trace()
-        print(batch)
-    exit()
+
+    train_data_loader = DataLoader(train_dataset, batch_size=hp.batch_size, shuffle=True, num_workers=0, collate_fn=train_dataset.collate_fn)
+    valid_data_loader = DataLoader(val_dataset, batch_size=hp.batch_size, shuffle=False, num_workers=0, collate_fn=val_dataset.collate_fn)
+
     print("Building BERT model")
-    bert = BERT(embed_dim=hp.embed_dim, hidden=hp.hidden, args=args)
-    print(bert)
+    vocab_size = 1051
+    bert = Encoder(model_config)
+    # print(bert)
 
     print("Creating BERT Trainer")
-    trainer = BERTTrainer(bert, vocab.vocab_size, train_dataloader=train_data_loader, test_dataloader=valid_data_loader,
+    trainer = BERTTrainerTTS(bert, vocab_size, train_dataloader=train_data_loader, test_dataloader=valid_data_loader,
                           with_cuda=args.with_cuda, cuda_devices=args.cuda_devices, args=args, path=paths)
 
     print("Training Start")
-
     trainer.train()
 
 

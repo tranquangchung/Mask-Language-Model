@@ -5,7 +5,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 import torchvision.utils as vutils
-from model import BERTLM, BERT
+from model import BERTLM, BERT, BERTLMTTS, BERTLMStyle
+from transformer import Encoder
 import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,7 +16,7 @@ import traceback
 import pdb
 
 
-class BERTTrainer:
+class BERTTrainerStyle:
     """
     BERTTrainer make the pretrained BERT model with two LM training method.
 
@@ -25,9 +26,11 @@ class BERTTrainer:
 
     """
 
-    def __init__(self, bert: BERT, vocab_size: int,
+    def __init__(self, bert: Encoder, vocab_size: int,
                  train_dataloader: DataLoader, test_dataloader: DataLoader = None,
-                 with_cuda: bool = True, cuda_devices=None, log_freq: int = hp.log_freq, args=None, global_step=0, path=None):
+                 with_cuda: bool = True, cuda_devices=None, log_freq: int = hp.log_freq,
+                 args=None, global_step=0, path=None, model_config=None
+                ):
         """
         :param bert: MLM model which you want to train
         :param vocab_size: total word vocab size
@@ -51,11 +54,11 @@ class BERTTrainer:
         # This BERT model will be saved every epoch
         self.bert = bert
         # Initialize the BERT Language Model, with BERT model
-        self.model = BERTLM(bert, vocab_size).to(self.device)
+        self.model = BERTLMStyle(bert, vocab_size, model_config).to(self.device)
         print(self.model)
         # load pretrained model
-        path = "/home/s2220411/Code/new_explore/Mask-Language-Model/output/model_mlm/mlm_ep499.model"
-        self.mlm_encoder = torch.load(path).to(self.device)
+        # path = "/home/s2220411/Code/new_explore/Mask-Language-Model/output/model_mlm/mlm_ep499.model"
+        # self.mlm_encoder = torch.load(path).to(self.device)
 
         # Distributed GPU training if CUDA can detect more than 1 GPU
         if with_cuda and torch.cuda.device_count() > 1:
@@ -77,18 +80,16 @@ class BERTTrainer:
         self.log_freq = log_freq
         # train
         self.train_loss_writer = SummaryWriter(f'{self.path.runs_path}/train/train_loss')
-        self.train_attn_layer_writer = SummaryWriter(f'{self.path.runs_path}/train/attn_layer')
         self.train_model_param_writer = SummaryWriter(f'{self.path.runs_path}/train/model_param')
         # valid
         self.valid_loss_writer = SummaryWriter(f'{self.path.runs_path}/valid/valid_loss')
-        self.valid_attn_layer_writer = SummaryWriter(f'{self.path.runs_path}/valid/valid_attn_layer')
 
         self.num_params()
 
     def train(self):
 
-        train_writer = (self.train_loss_writer, self.train_attn_layer_writer, self.train_model_param_writer)
-        valid_writer = (self.valid_loss_writer, self.valid_attn_layer_writer)
+        train_writer = [self.train_loss_writer, self.train_model_param_writer]
+        valid_writer = [self.valid_loss_writer]
         try:
             for epoch in range(hp.epochs):
 
@@ -107,7 +108,10 @@ class BERTTrainer:
                     data = {key: value.to(self.device) for key, value in data.items()}
 
                     # 1. forward masked_lm model
-                    mask_lm_output, attn_list = self.model.forward(data["mlm_input"], data["input_position"])
+                    mask_lm_output, attn_list = self.model(
+                        data["mlm_input"], data["src_masks"],
+                        data["mels"], data["mel_masks"],
+                       )
                     # with torch.no_grad():
                     #     mask_1, attn1 = self.mlm_encoder(data["mlm_input"], data["input_position"])
 
@@ -137,37 +141,6 @@ class BERTTrainer:
                     # writer train loss
                     if self.step % hp.save_train_loss == 0:
                         self.train_loss_writer.add_scalar('train_loss', loss, self.step)
-
-                    # writer
-                    if self.step % hp.save_runs == 0 and data["mlm_input"].size(0) == hp.batch_size: # 不足batch数量则不采样
-
-                        # writer attns_layer
-                        for layer, prob in enumerate(attn_list):
-                            prob = prob[0]
-                            fig, axs = plt.subplots(1, 4, figsize=(20, 10))
-                            print("Layer", layer + 1)
-                            for h in range(hp.attn_heads):
-                                # a = self.model.bert.layers[layer].multihead.attention[0][h].data
-                                self.draw(prob[h].cpu().detach().numpy(),
-                                     [], [], ax=axs[h])
-                            plt.savefig(f"{self.path.plt_train_attn_path}/Epoch{epoch}_train_step{self.step}_layer{layer+1}")
-                            # plt.show()
-
-                        # tensorboardX write
-                        for i, prob in enumerate(attn_list):  # 第i层,每层画四个图
-                            prob = prob[0]
-                            for j in range(hp.attn_heads):  # 1,2,3,4  第j个
-                                # print(f"j * self.args.batch_size - 1:{j * self.args.batch_size - 1}")
-                                x = vutils.make_grid(prob[j] * 255)  # eg:如果是512,94,94  则取127,255,383,511
-                                self.train_attn_layer_writer.add_image(f'Epoch{epoch}_train_attn_layer{i}_head{j + 1}', x, self.step)
-
-                        # write model_param
-                        for name, param in self.model.module.named_parameters():  # param.clone().cpu().data.numpy()   .module
-                            self.train_model_param_writer.add_histogram(f"Epoch{epoch}_train_{name}", param.clone().cpu().data.numpy(), self.step)
-
-                    # save model checkpoint
-                    if self.step % hp.save_checkpoint == 0:
-                        self.bert.checkpoint(self.path.bert_checkpoints_path, self.step)
 
                     # save bert model
                     if self.step % hp.save_model == 0:
@@ -200,7 +173,7 @@ class BERTTrainer:
 
 
     def evaluate(self, epoch, valid_writer):
-        (self.valid_loss_writer, self.valid_attn_layer_writer) = valid_writer
+        [self.valid_loss_writer] = valid_writer
         self.model.eval()
 
         # Setting the tqdm progress bar
@@ -219,7 +192,10 @@ class BERTTrainer:
                 data = {key: value.to(self.device) for key, value in data.items()}
 
                 # 1. forward masked_lm model
-                mask_lm_output, attn_list = self.model.forward(data["mlm_input"], data["input_position"])
+                mask_lm_output, attn_list = self.model(
+                    data["mlm_input"], data["src_masks"],
+                    data["mels"], data["mel_masks"],
+                )
 
                 # 2. NLLLoss of predicting masked token word
                 loss = self.criterion(mask_lm_output.transpose(1, 2), data["mlm_label"])
@@ -241,30 +217,6 @@ class BERTTrainer:
 
                 # writer valid loss
                 self.valid_loss_writer.add_scalar('valid_loss', loss, self.step)
-
-                if self.step % hp.save_runs == 0:
-                    # writer attns_layer
-                    for layer, prob in enumerate(attn_list):
-                        prob = prob[0]
-                        fig, axs = plt.subplots(1, 4, figsize=(20, 10))
-                        print("Layer", layer + 1)
-                        for h in range(hp.attn_heads):
-                            # a = self.model.bert.layers[layer].multihead.attention[0][h].data
-                            self.draw(prob[h].cpu().detach().numpy(),
-                                      [], [], ax=axs[h])
-                        plt.savefig(
-                            f"{self.path.plt_train_attn_path}/Epoch{epoch}_valid_step{self.step}_layer{layer + 1}")
-                        # plt.show()
-
-                    # tensorboardX write
-                    for i, prob in enumerate(attn_list):  # 第i层,每层画四个图
-                        prob = prob[0]
-                        for j in range(hp.attn_heads):  # 1,2,3,4  第j个
-                            # print(f"j * self.args.batch_size - 1:{j * self.args.batch_size - 1}")
-                            x = vutils.make_grid(prob[j] * 255)  # eg:如果是512,94,94  则取127,255,383,511
-                            self.train_attn_layer_writer.add_image(f'Epoch{epoch}_valid_attn_layer{i}_head{j + 1}',
-                                                                   x, self.step)
-
 
             print(f"Valid Over!")
             return avg_loss

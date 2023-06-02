@@ -6,7 +6,7 @@ import copy
 import torch.nn as nn
 # from utils.text.symbols import symbols
 import math
-import config.hparams as hp
+import configs.hparams as hp
 
 
 def clones(module, N):

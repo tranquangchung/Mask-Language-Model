@@ -7,7 +7,7 @@ import math
 import torch
 from torch.optim import Optimizer
 from torch.nn.utils import clip_grad_norm_
-import config.hparams as hp
+import configs.hparams as hp
 
 
 def warmup_cosine(x, warmup=0.002):

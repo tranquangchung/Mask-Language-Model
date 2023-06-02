@@ -116,16 +116,17 @@ def main():
         input_ids = batch["mlm_input"]
         position = batch["input_position"]
         labels = batch["mlm_label"]
+        src_masks = batch["src_masks"]
         with torch.no_grad():
-            outputs, attn_list = model(input_ids, position)
+            outputs, attn_list = model(input_ids, src_masks)
             outputs = torch.argmax(outputs, dim=2)
 
         for output, label, input_id in zip(outputs.detach().cpu(), labels.detach().cpu(), input_ids.detach().cpu()):
             mask_index = (input_id == 4).nonzero(as_tuple=True)[0]
             output_index = torch.index_select(output, 0, mask_index)
             label_index = torch.index_select(label, 0, mask_index)
-            print(output_index)
-            print(label_index)
+            print("output: ", output_index)
+            print("label: ", label_index)
             print("*" * 20)
             predict += torch.eq(output_index, label_index).sum()
             total += label_index.shape[0]

@@ -1,5 +1,5 @@
 import torch.nn as nn
-import config.hparams as hp
+import configs.hparams as hp
 import torch
 from model.transfomer_block import EncoderPrenet
 from model.transfomer_block import get_sinusoid_encoding_table, Attention, FFN, clones
@@ -10,7 +10,7 @@ class BERT(nn.Module):
     """
     Encoder Network
     """
-    def __init__(self, embed_dim, hidden, args=None):
+    def __init__(self, embed_dim, hidden, args=None, vocab_size=None):
         """
         :param embedding_size: dimension of embedding
         :param num_hidden: dimension of hidden
@@ -24,8 +24,8 @@ class BERT(nn.Module):
         self.attn_heads = hp.attn_heads
 
         self.alpha = nn.Parameter(torch.ones(1))
-        self.embed = nn.Embedding(self.char_nums, embed_dim, padding_idx=0)
-        self.pos_emb = nn.Embedding.from_pretrained(get_sinusoid_encoding_table(self.char_maxlen, hidden, padding_idx=0),
+        self.embed = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        self.pos_emb = nn.Embedding.from_pretrained(get_sinusoid_encoding_table(3501, hidden, padding_idx=0),
                                                     freeze=True)
         self.pos_dropout = nn.Dropout(p=hp.pos_dropout_rate)
         self.encoder_prenet = EncoderPrenet(embed_dim, hidden)
@@ -36,7 +36,6 @@ class BERT(nn.Module):
         # self.step = nn.Parameter(torch.zeros(1).long(), requires_grad=False)
 
     def forward(self, x, pos):
-        pdb.set_trace()
 
         if self.training:
             c_mask = x.ne(0).type(torch.float)

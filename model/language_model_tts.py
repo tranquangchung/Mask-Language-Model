@@ -2,7 +2,7 @@ import torch.nn as nn
 from model.bert import BERT
 import pdb
 
-class BERTLM(nn.Module):
+class BERTLMTTS(nn.Module):
     """
     BERT Language Model
     Masked Language Model
@@ -19,9 +19,8 @@ class BERTLM(nn.Module):
         self.mask_lm = MaskedLanguageModel(self.bert.hidden, vocab_size)
         self.init_model()
 
-    def forward(self, x, pos):
-        x, attn_list = self.bert(x, pos)
-        pdb.set_trace()
+    def forward(self, x, mask):
+        x, attn_list = self.bert(x, mask)
         return self.mask_lm(x), attn_list
 
     def init_model(self):

@@ -1,14 +1,15 @@
 import torch.nn as nn
 from model.bert import BERT
+from model.modules import MelStyleEncoder
 import pdb
 
-class BERTLM(nn.Module):
+class BERTLMStyle(nn.Module):
     """
     BERT Language Model
     Masked Language Model
     """
 
-    def __init__(self, bert: BERT, vocab_size):
+    def __init__(self, bert: BERT, vocab_size, model_config):
         """
         :param bert: BERT model which should be trained
         :param vocab_size: total vocab size for masked_lm
@@ -17,11 +18,12 @@ class BERTLM(nn.Module):
         super().__init__()
         self.bert = bert
         self.mask_lm = MaskedLanguageModel(self.bert.hidden, vocab_size)
+        self.melstyle_encoder = MelStyleEncoder(model_config)
         self.init_model()
 
-    def forward(self, x, pos):
-        x, attn_list = self.bert(x, pos)
-        pdb.set_trace()
+    def forward(self, x, mask, mels, mel_masks):
+        style_vector = self.melstyle_encoder(mels, mel_masks)
+        x, attn_list = self.bert(x, style_vector, mask)
         return self.mask_lm(x), attn_list
 
     def init_model(self):

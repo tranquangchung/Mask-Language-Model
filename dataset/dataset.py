@@ -77,7 +77,6 @@ class BERTDataset(Dataset):
 
 
     def random_word(self, sentence):
-        pdb.set_trace()
         tokens = sentence.split()
         tokens_len = [len(token) for token in tokens]
         chars = [char for char in sentence]
@@ -105,7 +104,6 @@ class BERTDataset(Dataset):
             else:
                 chars[i] = self.vocab.char2index(char)
                 output_label.append(0)
-        pdb.set_trace()
         return chars, output_label
 
 
